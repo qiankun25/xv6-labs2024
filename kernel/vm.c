@@ -17,6 +17,33 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+
+//辅助检测level-1的超页PTEsuperpage
+int
+issuperpte(pte_t pte, int level) 
+{
+  // level 1的叶子节点且有效
+  return level == 1 && (pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X));
+}
+
+// 获取指定级别的PTE
+pte_t *
+walk_level(pagetable_t pagetable, uint64 va, int level)
+{
+  if(level < 0 || level > 2)
+    panic("walk_level");
+
+  for(int i = 2; i > level; i--) {
+    pte_t *pte = &pagetable[PX(i, va)];
+    if(*pte & PTE_V) {
+      pagetable = (pagetable_t)PTE2PA(*pte);
+    } else {
+      return 0;
+    }
+  }
+  return &pagetable[PX(level, va)];
+}
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -117,6 +144,9 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   return &pagetable[PX(0, va)];
 }
 
+
+
+
 // Look up a virtual address, return the physical address,
 // or 0 if not mapped.
 // Can only be used to look up user pages.
@@ -162,30 +192,68 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   uint64 a, last;
   pte_t *pte;
 
-  if((va % PGSIZE) != 0)
-    panic("mappages: va not aligned");
-
-  if((size % PGSIZE) != 0)
-    panic("mappages: size not aligned");
-
   if(size == 0)
     panic("mappages: size");
   
-  a = va;
-  last = va + size - PGSIZE;
+  a = PGROUNDDOWN(va);
+  last = PGROUNDDOWN(va + size - 1);
+  
   for(;;){
+    // 检查是否应该且能够使用超页
+    if(size >= SUPERPAGE_SIZE && 
+       a % SUPERPAGE_SIZE == 0 && 
+       pa % SUPERPAGE_SIZE == 0 && 
+       (last - a + PGSIZE) >= SUPERPAGE_SIZE &&
+       issuperpage((void*)pa)) {
+      
+      // 获取level-1 PTE进行超页映射
+      pte = walk_level(pagetable, a, 1);
+      if(pte == 0) {
+        // 需要分配中间页表
+        if((pte = walk(pagetable, a, 1)) == 0)
+          return -1;
+        // 但是我们需要在level-1设置叶子节点
+        char *mem = kalloc();
+        if(mem == 0)
+          return -1;
+        memset(mem, 0, PGSIZE);
+        *pte = PA2PTE(mem) | PTE_V;
+        pte = walk_level(pagetable, a, 1);
+      }
+      
+      if(*pte & PTE_V)
+        panic("mappages: superpage remap");
+      
+      // 设置level-1 PTE作为叶子节点
+      *pte = PA2PTE(pa) | perm | PTE_V;
+      
+      a += SUPERPAGE_SIZE;
+      pa += SUPERPAGE_SIZE;
+      size -= SUPERPAGE_SIZE;
+      
+      if(a > last)
+        break;
+      continue;
+    }
+    
+    // 标准4KB页面映射
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
     if(*pte & PTE_V)
       panic("mappages: remap");
+      
     *pte = PA2PTE(pa) | perm | PTE_V;
+    
     if(a == last)
       break;
     a += PGSIZE;
     pa += PGSIZE;
+    size -= PGSIZE;
   }
   return 0;
 }
+
+
 
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
@@ -195,19 +263,40 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
   uint64 a;
   pte_t *pte;
-  int sz;
 
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
-  for(a = va; a < va + npages*PGSIZE; a += sz){
-    sz = PGSIZE;
-    if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0) {
-      printf("va=%ld pte=%ld\n", a, *pte);
-      panic("uvmunmap: not mapped");
+  for(a = va; a < va + npages*PGSIZE; ){
+    if((pte = walk(pagetable, a, 0)) == 0) {
+      a += PGSIZE;
+      continue;
     }
+    if((*pte & PTE_V) == 0) {
+      a += PGSIZE;
+      continue;
+    }
+    
+    // 检查是否是超页 - 通过检查level-1 PTE
+    pte_t *pte1 = walk(pagetable, a, 0);
+    if(pte1 && a % SUPERPAGE_SIZE == 0) {
+      // 检查level-1是否是叶子节点
+      pte_t *l1pte = walk_level(pagetable, a, 1);
+      if(l1pte && issuperpte(*l1pte, 1)) {
+        // 这是一个超页
+        if(do_free) {
+          uint64 pa = PTE2PA(*l1pte);
+          if(issuperpage((void*)pa)) {
+            superfree((void*)pa);
+          }
+        }
+        *l1pte = 0;
+        a += SUPERPAGE_SIZE;
+        continue;
+      }
+    }
+    
+    // 处理常规页面
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -215,6 +304,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       kfree((void*)pa);
     }
     *pte = 0;
+    a += PGSIZE;
   }
 }
 
@@ -255,29 +345,54 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 {
   char *mem;
   uint64 a;
-  int sz;
 
   if(newsz < oldsz)
     return oldsz;
 
   oldsz = PGROUNDUP(oldsz);
-  for(a = oldsz; a < newsz; a += sz){
-    sz = PGSIZE;
-    mem = kalloc();
-    if(mem == 0){
-      uvmdealloc(pagetable, a, oldsz);
-      return 0;
+  for(a = oldsz; a < newsz; ){
+  uint64 remaining = newsz - a;
+  
+  // 检查是否应该使用超页：
+  // 1. 剩余大小 >= 2MB
+  // 2. 当前虚拟地址2MB对齐
+  // 3. 可以分配到2MB对齐的物理内存
+  if(remaining >= SUPERPAGE_SIZE && 
+      a % SUPERPAGE_SIZE == 0) {
+    
+    if((mem = superalloc()) != 0) {
+      if(mappages(pagetable, a, SUPERPAGE_SIZE, (uint64)mem, 
+                  PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        superfree(mem);
+        goto err;
+      }
+      a += SUPERPAGE_SIZE;
+      continue;
     }
-#ifndef LAB_SYSCALL
-    memset(mem, 0, sz);
-#endif
-    if(mappages(pagetable, a, sz, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
-      kfree(mem);
-      uvmdealloc(pagetable, a, oldsz);
-      return 0;
-    }
+    // 如果超页分配失败，继续使用常规页面
+  }
+  
+  // 分配常规4KB页面
+  mem = kalloc();
+  if(mem == 0){
+    uvmdealloc(pagetable, a, oldsz);
+    return 0;
+  }
+  #ifndef LAB_SYSCALL
+  memset(mem, 0, PGSIZE);
+  #endif
+  if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+    kfree(mem);
+    uvmdealloc(pagetable, a, oldsz);
+    return 0;
+  }
+  a += PGSIZE;
   }
   return newsz;
+
+  err:
+  uvmdealloc(pagetable, a, oldsz);
+  return 0;
 }
 
 // Deallocate user pages to bring the process size from oldsz to
@@ -341,15 +456,35 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uint64 pa, i;
   uint flags;
   char *mem;
-  int szinc;
 
-  for(i = 0; i < sz; i += szinc){
-    szinc = PGSIZE;
-    szinc = PGSIZE;
+  for(i = 0; i < sz; ){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    
+    // 检查是否是超页
+    if(i % SUPERPAGE_SIZE == 0) {
+      pte_t *l1pte = walk_level(old, i, 1);
+      if(l1pte && issuperpte(*l1pte, 1)) {
+        // 复制超页
+        pa = PTE2PA(*l1pte);
+        flags = PTE_FLAGS(*l1pte);
+        
+        if((mem = superalloc()) == 0)
+          goto err;
+        
+        memmove(mem, (char*)pa, SUPERPAGE_SIZE);
+        if(mappages(new, i, SUPERPAGE_SIZE, (uint64)mem, flags) != 0){
+          superfree(mem);
+          goto err;
+        }
+        i += SUPERPAGE_SIZE;
+        continue;
+      }
+    }
+    
+    // 复制常规页面
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -359,10 +494,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       kfree(mem);
       goto err;
     }
+    i += PGSIZE;
   }
   return 0;
 
- err:
+err:
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
@@ -489,8 +625,52 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
 #ifdef LAB_PGTBL
 void
+vmprint_recursive(pagetable_t pagetable, int level, uint64 va_prefix)
+{
+for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V) {
+      // 计算虚拟地址
+      uint64 va;
+      if (level == 0) {
+        // L2级别：第9位索引对应VA的[38:30]位
+        va = (uint64)i << 30;
+        // 对于高位地址需要符号扩展
+        if (i >= 256) {
+          va |= 0xFFFFFFC000000000ULL;
+        }
+      } else if (level == 1) {
+        // L1级别：第9位索引对应VA的[29:21]位
+        va = va_prefix | ((uint64)i << 21);
+      } else {
+        // L0级别：第9位索引对应VA的[20:12]位
+        va = va_prefix | ((uint64)i << 12);
+      }
+
+      uint64 pa = PTE2PA(pte);
+
+      // 打印缩进 - 注意格式：空格开头，然后是..
+      printf(" ..");
+      for (int j = 0; j < level; j++) {
+        printf(" ..");
+      }
+
+      // 使用%p格式打印地址（按题目要求）
+      printf("%p: pte %p pa %p\n",
+             (void*)va, (void*)(uint64)pte, (void*)pa);
+
+      // 如果不是叶子节点（没有R/W/X权限），继续递归
+      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
+        vmprint_recursive((pagetable_t)pa, level+1, va);
+      }
+    }
+  }
+}
+
+void
 vmprint(pagetable_t pagetable) {
-  // your code here
+  printf("page table %p\n", pagetable);
+  vmprint_recursive(pagetable, 0, 0);
 }
 #endif
 

@@ -12,4 +12,5 @@
 #define FSSIZE       2000  // size of file system in blocks
 #define MAXPATH      128   // maximum file path name
 #define USERSTACK    1     // user stack pages
-
+#define SUPERPAGE_SIZE (2 * 1024 * 1024)  // 2MB
+#define NSUPERPAGES 16  // 超页数量
