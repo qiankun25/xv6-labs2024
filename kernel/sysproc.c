@@ -67,6 +67,8 @@ sys_sleep(void)
     sleep(&ticks, &tickslock);
   }
   release(&tickslock);
+
+  backtrace();
   return 0;
 }
 
@@ -90,4 +92,36 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+
+uint64
+sys_sigalarm(void)
+{
+  int interval;
+  uint64 handler;
+  
+  argint(0, &interval);
+  argaddr(1, &handler);
+    
+  struct proc *p = myproc();
+  p->alarm_interval = interval;
+  p->alarm_handler = handler;
+  p->alarm_ticks = interval;
+  
+  return 0;
+}
+
+uint64
+sys_sigreturn(void)
+{
+  struct proc *p = myproc();
+  
+  // 恢复寄存器状态
+  memmove(p->trapframe, &p->alarm_trapframe, sizeof(struct trapframe));
+  
+  // 清除active标记，允许下次alarm
+  p->alarm_active = 0;
+  
+   return p->trapframe->a0;
 }
