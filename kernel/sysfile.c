@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -501,5 +502,126 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+uint64
+sys_mmap(void)
+{
+  uint64 addr;
+  int len, prot, flags, fd, offset;
+  struct file *f;
+  struct proc *p = myproc();
+
+  
+  argaddr(0, &addr);
+  argint(1, &len);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+  argint(5, &offset);
+
+  // 参数检查
+  if (addr != 0 || offset != 0 || len <= 0)
+    return -1;
+  if ((prot & (PROT_READ | PROT_WRITE)) == 0)
+    return -1;
+  if (flags != MAP_SHARED && flags != MAP_PRIVATE)
+    return -1;
+
+  // 获取文件
+  if((f = p->ofile[fd]) == 0)
+    return -1;
+  if (prot & PROT_READ && !f->readable)
+    return -1;
+  if (prot & PROT_WRITE && flags == MAP_SHARED && !f->writable)
+    return -1;
+
+  // 找到空闲 VMA
+  int i;
+  for(i = 0; i < NVMA; i++){
+    if(p->vmas[i].used == 0)
+      break;
+  }
+  if(i == NVMA)
+    return -1;
+
+  // 分配虚拟地址
+  uint64 va = MMAPSTART;
+  for(int j = 0; j < NVMA; j++){
+    if(p->vmas[j].used){
+      if(va < p->vmas[j].addr + p->vmas[j].len)
+        va = p->vmas[j].addr + p->vmas[j].len;
+    }
+  }
+
+  // 检查边界（不能超过 TRAMPOLINE）
+  if (va + len >= TRAMPOLINE)
+    return -1;
+
+  // 设置 VMA
+  p->vmas[i].used = 1;
+  p->vmas[i].addr = va;
+  p->vmas[i].len = len;
+  p->vmas[i].prot = prot;
+  p->vmas[i].flags = flags;
+  p->vmas[i].f = f;
+  p->vmas[i].offset = offset;
+
+  // 增加文件引用计数
+  filedup(f);
+
+  return va;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int len;
+  struct proc *p = myproc();
+
+  // 获取参数
+  argaddr(0, &addr);
+  argint(1, &len);
+
+  // 参数合法性检查
+  if (len <= 0 || addr % PGSIZE != 0)
+    return -1;
+
+  // 找到对应的 VMA
+  int i;
+  for (i = 0; i < NVMA; i++) {
+    if (p->vmas[i].used &&
+        p->vmas[i].addr <= addr &&
+        addr + len <= p->vmas[i].addr + p->vmas[i].len)
+      break;
+  }
+  if (i == NVMA)
+    return -1;
+
+  struct vma *v = &p->vmas[i];
+
+  // 如果是 MAP_SHARED，需要写回文件
+  if (v->flags == MAP_SHARED) {
+    filewrite(v->f, addr, len);
+  }
+
+  // 解除映射
+  uvmunmap(p->pagetable, addr, len/PGSIZE, 1);
+
+  // 更新或释放 VMA
+  if (addr == v->addr && len == v->len) {
+    fileclose(v->f);
+    v->used = 0;
+  } else if (addr == v->addr) {
+    // 从开头解除映射
+    v->addr += len;
+    v->len -= len;
+    v->offset += len;
+  } else if (addr + len == v->addr + v->len) {
+    // 从结尾解除映射
+    v->len -= len;
+  }
+
   return 0;
 }

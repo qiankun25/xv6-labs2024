@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -118,6 +119,11 @@ allocproc(void)
     } else {
       release(&p->lock);
     }
+  }
+
+   // 初始化VMA数组
+  for(int i = 0; i < NVMA; i++){
+    p->vmas[i].used = 0;
   }
   return 0;
 
@@ -299,6 +305,14 @@ fork(void)
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
+   // 复制VMA
+  for(int i = 0; i < NVMA; i++){
+    if(p->vmas[i].used){
+      np->vmas[i] = p->vmas[i];
+      filedup(p->vmas[i].f);
+    }
+  } 
+
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
@@ -357,6 +371,18 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+    // 清理mmap映射
+  for(int i = 0; i < NVMA; i++){
+    if(p->vmas[i].used){
+      struct vma *v = &p->vmas[i];
+      if(v->flags == MAP_SHARED){
+        filewrite(v->f, v->addr, v->len);
+      }
+      uvmunmap(p->pagetable, v->addr, v->len/PGSIZE, 1);
+      fileclose(v->f);
+      v->used = 0;
     }
   }
 

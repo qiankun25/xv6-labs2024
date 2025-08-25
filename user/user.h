@@ -4,6 +4,11 @@ typedef long int off_t;
 #endif
 struct stat;
 
+// mmap calls
+void* mmap(void *addr, int len, int prot, int flags, int fd, int offset);
+int munmap(void *addr, int len);
+
+
 // system calls
 int fork(void);
 int exit(int) __attribute__((noreturn));

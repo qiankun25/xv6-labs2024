@@ -1,11 +1,14 @@
-#include "param.h"
 #include "types.h"
+#include "param.h"
 #include "memlayout.h"
-#include "elf.h"
 #include "riscv.h"
+#include "spinlock.h"
+#include "proc.h"       
 #include "defs.h"
-#include "fs.h"
-
+#include "fs.h"         
+#include "sleeplock.h"
+#include "file.h"       
+#include "fcntl.h"     
 /*
  * the kernel's page table.
  */
@@ -14,6 +17,23 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+
+int
+lazyalloc(pagetable_t pagetable, uint64 va)
+{
+  char *mem;
+  mem = kalloc();
+  if(mem == 0)
+    return -1;
+  memset(mem, 0, PGSIZE);
+  if(mappages(pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_U) != 0){
+    kfree(mem);
+    return -1;
+  }
+  return 0;
+}
+
+
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -355,97 +375,172 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
+
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0;
-  pte_t *pte;
+    uint64 n, va0, pa0;
+    pte_t *pte;
 
-  while(len > 0){
-    va0 = PGROUNDDOWN(dstva);
-    if(va0 >= MAXVA)
-      return -1;
-    pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
-      return -1;
-    pa0 = PTE2PA(*pte);
-    n = PGSIZE - (dstva - va0);
-    if(n > len)
-      n = len;
-    memmove((void *)(pa0 + (dstva - va0)), src, n);
+    while(len > 0){
+        va0 = PGROUNDDOWN(dstva);
+        if(va0 >= MAXVA)
+            return -1;
 
-    len -= n;
-    src += n;
-    dstva = va0 + PGSIZE;
-  }
-  return 0;
+        pte = walk(pagetable, va0, 0);
+        if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+            return -1;
+
+        pa0 = PTE2PA(*pte);
+        if(pa0 == 0){
+            // lazy allocation
+            if(lazyalloc(pagetable, va0) < 0)
+                return -1;
+            continue;  // 分配成功，重新进入循环
+        }
+
+        if((*pte & PTE_W) == 0)
+            return -1;
+
+        n = PGSIZE - (dstva - va0);
+        if(n > len)
+            n = len;
+        memmove((void *)(pa0 + (dstva - va0)), src, n);
+
+        len -= n;
+        src += n;
+        dstva = va0 + PGSIZE;
+    }
+
+    return 0;
 }
+
 
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
 int
-copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
+copyin(pagetable_t pagetable, char *dst, uint64 src, uint64 len)
 {
   uint64 n, va0, pa0;
+  pte_t *pte;
 
   while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+    va0 = PGROUNDDOWN(src);
+    if(va0 >= MAXVA)
       return -1;
-    n = PGSIZE - (srcva - va0);
+    pte = walk(pagetable, va0, 0);
+    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+      return -1;
+
+    pa0 = PTE2PA(*pte);
+    if(pa0 == 0){
+      if(lazyalloc(pagetable, va0) < 0)
+        return -1;
+      continue;  // 重试当前页
+    }
+
+    n = PGSIZE - (src - va0);
     if(n > len)
       n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+
+    memmove(dst, (void *)(pa0 + (src - va0)), n);
 
     len -= n;
     dst += n;
-    srcva = va0 + PGSIZE;
+    src = va0 + PGSIZE;
   }
   return 0;
 }
+
 
 // Copy a null-terminated string from user to kernel.
 // Copy bytes to dst from virtual address srcva in a given page table,
 // until a '\0', or max.
 // Return 0 on success, -1 on error.
 int
-copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
+copyinstr(pagetable_t pagetable, char *dst, uint64 src, uint64 max)
 {
-  uint64 n, va0, pa0;
-  int got_null = 0;
+    uint64 n, va0, pa0;
+    pte_t *pte;
+    char c;
 
-  while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
-      n = max;
+    for(n = 0; n < max; n++){
+    retry:
+        va0 = PGROUNDDOWN(src);
+        if(va0 >= MAXVA)
+            return -1;
 
-    char *p = (char *) (pa0 + (srcva - va0));
-    while(n > 0){
-      if(*p == '\0'){
-        *dst = '\0';
-        got_null = 1;
-        break;
-      } else {
-        *dst = *p;
-      }
-      --n;
-      --max;
-      p++;
-      dst++;
+        pte = walk(pagetable, va0, 0);
+        if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+            return -1;
+
+        pa0 = PTE2PA(*pte);
+        if(pa0 == 0){
+            if(lazyalloc(pagetable, va0) < 0)
+                return -1;
+            goto retry; // 重试当前地址
+        }
+
+        c = *(char *)(pa0 + (src - va0));
+        *dst++ = c;
+        if(c == '\0')
+            return 0;
+        src++;
     }
+    return -1;
+}
 
-    srcva = va0 + PGSIZE;
+
+int
+mmap_handler(uint64 va)
+{
+  struct proc *p = myproc();
+  
+  // 查找对应的VMA
+  struct vma *v = 0;
+  for(int i = 0; i < NVMA; i++){
+    if(p->vmas[i].used && 
+       p->vmas[i].addr <= va && 
+       va < p->vmas[i].addr + p->vmas[i].len){
+      v = &p->vmas[i];
+      break;
+    }
   }
-  if(got_null){
-    return 0;
-  } else {
+  
+  if(v == 0)
+    return -1;
+  
+  // 分配物理页面
+  char *mem = kalloc();
+  if(mem == 0)
+    return -1;
+  
+  memset(mem, 0, PGSIZE);
+  
+  // 计算文件偏移
+  uint64 offset = v->offset + (PGROUNDDOWN(va) - v->addr);
+  
+  // 读取文件内容
+  ilock(v->f->ip);
+  int r = readi(v->f->ip, 0, (uint64)mem, offset, PGSIZE);
+  iunlock(v->f->ip);
+  
+  if(r < 0){
+    kfree(mem);
     return -1;
   }
+  
+  // 设置页面权限
+  int perm = PTE_U;
+  if(v->prot & PROT_READ)  perm |= PTE_R;
+  if(v->prot & PROT_WRITE) perm |= PTE_W;
+  
+  // 映射到用户页表
+  if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, perm) != 0){
+    kfree(mem);
+    return -1;
+  }
+  
+  return 0;
 }

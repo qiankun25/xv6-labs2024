@@ -237,3 +237,11 @@ void            netinit(void);
 void            net_rx(char *buf, int len);
 
 #endif
+
+// sysfile.c
+uint64          sys_mmap(void);
+uint64          sys_munmap(void);
+
+
+// vm.c
+int             mmap_handler(uint64);
