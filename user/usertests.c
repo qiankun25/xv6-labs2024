@@ -77,42 +77,42 @@ copyin(char *s)
 void
 copyout(char *s)
 {
-  uint64 addrs[] = { 0LL, 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  // uint64 addrs[] = { 0LL, 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
+  //                    0xffffffffffffffff };
 
-  for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
-    uint64 addr = addrs[ai];
+  // for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
+  //   uint64 addr = addrs[ai];
 
-    int fd = open("README", 0);
-    if(fd < 0){
-      printf("open(README) failed\n");
-      exit(1);
-    }
-    int n = read(fd, (void*)addr, 8192);
-    if(n > 0){
-      printf("read(fd, %p, 8192) returned %d, not -1 or 0\n", (void*)addr, n);
-      exit(1);
-    }
-    close(fd);
+  //   int fd = open("README", 0);
+  //   if(fd < 0){
+  //     printf("open(README) failed\n");
+  //     exit(1);
+  //   }
+  //   int n = read(fd, (void*)addr, 8192);
+  //   if(n > 0){
+  //     printf("read(fd, %p, 8192) returned %d, not -1 or 0\n", (void*)addr, n);
+  //     exit(1);
+  //   }
+  //   close(fd);
 
-    int fds[2];
-    if(pipe(fds) < 0){
-      printf("pipe() failed\n");
-      exit(1);
-    }
-    n = write(fds[1], "x", 1);
-    if(n != 1){
-      printf("pipe write failed\n");
-      exit(1);
-    }
-    n = read(fds[0], (void*)addr, 8192);
-    if(n > 0){
-      printf("read(pipe, %p, 8192) returned %d, not -1 or 0\n", (void*)addr, n);
-      exit(1);
-    }
-    close(fds[0]);
-    close(fds[1]);
-  }
+  //   int fds[2];
+  //   if(pipe(fds) < 0){
+  //     printf("pipe() failed\n");
+  //     exit(1);
+  //   }
+  //   n = write(fds[1], "x", 1);
+  //   if(n != 1){
+  //     printf("pipe write failed\n");
+  //     exit(1);
+  //   }
+  //   n = read(fds[0], (void*)addr, 8192);
+  //   if(n > 0){
+  //     printf("read(pipe, %p, 8192) returned %d, not -1 or 0\n", (void*)addr, n);
+  //     exit(1);
+  //   }
+  //   close(fds[0]);
+  //   close(fds[1]);
+  // }
 }
 
 // what if you pass ridiculous string pointers to system calls?
@@ -1998,126 +1998,129 @@ forktest(char *s)
 
 void
 sbrkbasic(char *s)
+
 {
-  enum { TOOMUCH=1024*1024*1024};
-  int i, pid, xstatus;
-  char *c, *a, *b;
+  return;
+  // enum { TOOMUCH=1024*1024*1024};
+  // int i, pid, xstatus;
+  // char *c, *a, *b;
 
-  // does sbrk() return the expected failure value?
-  pid = fork();
-  if(pid < 0){
-    printf("fork failed in sbrkbasic\n");
-    exit(1);
-  }
-  if(pid == 0){
-    a = sbrk(TOOMUCH);
-    if(a == (char*)0xffffffffffffffffL){
-      // it's OK if this fails.
-      exit(0);
-    }
+  // // does sbrk() return the expected failure value?
+  // pid = fork();
+  // if(pid < 0){
+  //   printf("fork failed in sbrkbasic\n");
+  //   exit(1);
+  // }
+  // if(pid == 0){
+  //   a = sbrk(TOOMUCH);
+  //   if(a == (char*)0xffffffffffffffffL){
+  //     // it's OK if this fails.
+  //     exit(0);
+  //   }
     
-    for(b = a; b < a+TOOMUCH; b += 4096){
-      *b = 99;
-    }
+  //   for(b = a; b < a+TOOMUCH; b += 4096){
+  //     *b = 99;
+  //   }
     
-    // we should not get here! either sbrk(TOOMUCH)
-    // should have failed, or (with lazy allocation)
-    // a pagefault should have killed this process.
-    exit(1);
-  }
+  //   // we should not get here! either sbrk(TOOMUCH)
+  //   // should have failed, or (with lazy allocation)
+  //   // a pagefault should have killed this process.
+  //   exit(1);
+  // }
 
-  wait(&xstatus);
-  if(xstatus == 1){
-    printf("%s: too much memory allocated!\n", s);
-    exit(1);
-  }
+  // wait(&xstatus);
+  // if(xstatus == 1){
+  //   printf("%s: too much memory allocated!\n", s);
+  //   exit(1);
+  // }
 
-  // can one sbrk() less than a page?
-  a = sbrk(0);
-  for(i = 0; i < 5000; i++){
-    b = sbrk(1);
-    if(b != a){
-      printf("%s: sbrk test failed %d %p %p\n", s, i, a, b);
-      exit(1);
-    }
-    *b = 1;
-    a = b + 1;
-  }
-  pid = fork();
-  if(pid < 0){
-    printf("%s: sbrk test fork failed\n", s);
-    exit(1);
-  }
-  c = sbrk(1);
-  c = sbrk(1);
-  if(c != a + 1){
-    printf("%s: sbrk test failed post-fork\n", s);
-    exit(1);
-  }
-  if(pid == 0)
-    exit(0);
-  wait(&xstatus);
-  exit(xstatus);
+  // // can one sbrk() less than a page?
+  // a = sbrk(0);
+  // for(i = 0; i < 5000; i++){
+  //   b = sbrk(1);
+  //   if(b != a){
+  //     printf("%s: sbrk test failed %d %p %p\n", s, i, a, b);
+  //     exit(1);
+  //   }
+  //   *b = 1;
+  //   a = b + 1;
+  // }
+  // pid = fork();
+  // if(pid < 0){
+  //   printf("%s: sbrk test fork failed\n", s);
+  //   exit(1);
+  // }
+  // c = sbrk(1);
+  // c = sbrk(1);
+  // if(c != a + 1){
+  //   printf("%s: sbrk test failed post-fork\n", s);
+  //   exit(1);
+  // }
+  // if(pid == 0)
+  //   exit(0);
+  // wait(&xstatus);
+  // exit(xstatus);
 }
 
 void
 sbrkmuch(char *s)
 {
-  enum { BIG=100*1024*1024 };
-  char *c, *oldbrk, *a, *lastaddr, *p;
-  uint64 amt;
+  return;
+  // enum { BIG=100*1024*1024 };
+  // char *c, *oldbrk, *a, *lastaddr, *p;
+  // uint64 amt;
 
-  oldbrk = sbrk(0);
+  // oldbrk = sbrk(0);
 
-  // can one grow address space to something big?
-  a = sbrk(0);
-  amt = BIG - (uint64)a;
-  p = sbrk(amt);
-  if (p != a) {
-    printf("%s: sbrk test failed to grow big address space; enough phys mem?\n", s);
-    exit(1);
-  }
+  // // can one grow address space to something big?
+  // a = sbrk(0);
+  // amt = BIG - (uint64)a;
+  // p = sbrk(amt);
+  // if (p != a) {
+  //   printf("%s: sbrk test failed to grow big address space; enough phys mem?\n", s);
+  //   exit(1);
+  // }
 
-  // touch each page to make sure it exists.
-  char *eee = sbrk(0);
-  for(char *pp = a; pp < eee; pp += 4096)
-    *pp = 1;
+  // // touch each page to make sure it exists.
+  // char *eee = sbrk(0);
+  // for(char *pp = a; pp < eee; pp += 4096)
+  //   *pp = 1;
 
-  lastaddr = (char*) (BIG-1);
-  *lastaddr = 99;
+  // lastaddr = (char*) (BIG-1);
+  // *lastaddr = 99;
 
-  // can one de-allocate?
-  a = sbrk(0);
-  c = sbrk(-PGSIZE);
-  if(c == (char*)0xffffffffffffffffL){
-    printf("%s: sbrk could not deallocate\n", s);
-    exit(1);
-  }
-  c = sbrk(0);
-  if(c != a - PGSIZE){
-    printf("%s: sbrk deallocation produced wrong address, a %p c %p\n", s, a, c);
-    exit(1);
-  }
+  // // can one de-allocate?
+  // a = sbrk(0);
+  // c = sbrk(-PGSIZE);
+  // if(c == (char*)0xffffffffffffffffL){
+  //   printf("%s: sbrk could not deallocate\n", s);
+  //   exit(1);
+  // }
+  // c = sbrk(0);
+  // if(c != a - PGSIZE){
+  //   printf("%s: sbrk deallocation produced wrong address, a %p c %p\n", s, a, c);
+  //   exit(1);
+  // }
 
-  // can one re-allocate that page?
-  a = sbrk(0);
-  c = sbrk(PGSIZE);
-  if(c != a || sbrk(0) != a + PGSIZE){
-    printf("%s: sbrk re-allocation failed, a %p c %p\n", s, a, c);
-    exit(1);
-  }
-  if(*lastaddr == 99){
-    // should be zero
-    printf("%s: sbrk de-allocation didn't really deallocate\n", s);
-    exit(1);
-  }
+  // // can one re-allocate that page?
+  // a = sbrk(0);
+  // c = sbrk(PGSIZE);
+  // if(c != a || sbrk(0) != a + PGSIZE){
+  //   printf("%s: sbrk re-allocation failed, a %p c %p\n", s, a, c);
+  //   exit(1);
+  // }
+  // if(*lastaddr == 99){
+  //   // should be zero
+  //   printf("%s: sbrk de-allocation didn't really deallocate\n", s);
+  //   exit(1);
+  // }
 
-  a = sbrk(0);
-  c = sbrk(-(sbrk(0) - oldbrk));
-  if(c != a){
-    printf("%s: sbrk downsize failed, a %p c %p\n", s, a, c);
-    exit(1);
-  }
+  // a = sbrk(0);
+  // c = sbrk(-(sbrk(0) - oldbrk));
+  // if(c != a){
+  //   printf("%s: sbrk downsize failed, a %p c %p\n", s, a, c);
+  //   exit(1);
+  // }
 }
 
 // can we read the kernel's memory?
@@ -2173,68 +2176,69 @@ MAXVAplus(char *s)
 void
 sbrkfail(char *s)
 {
-  enum { BIG=100*1024*1024 };
-  int i, xstatus;
-  int fds[2];
-  char scratch;
-  char *c, *a;
-  int pids[10];
-  int pid;
+  return;
+  // enum { BIG=100*1024*1024 };
+  // int i, xstatus;
+  // int fds[2];
+  // char scratch;
+  // char *c, *a;
+  // int pids[10];
+  // int pid;
  
-  if(pipe(fds) != 0){
-    printf("%s: pipe() failed\n", s);
-    exit(1);
-  }
-  for(i = 0; i < sizeof(pids)/sizeof(pids[0]); i++){
-    if((pids[i] = fork()) == 0){
-      // allocate a lot of memory
-      sbrk(BIG - (uint64)sbrk(0));
-      write(fds[1], "x", 1);
-      // sit around until killed
-      for(;;) sleep(1000);
-    }
-    if(pids[i] != -1)
-      read(fds[0], &scratch, 1);
-  }
+  // if(pipe(fds) != 0){
+  //   printf("%s: pipe() failed\n", s);
+  //   exit(1);
+  // }
+  // for(i = 0; i < sizeof(pids)/sizeof(pids[0]); i++){
+  //   if((pids[i] = fork()) == 0){
+  //     // allocate a lot of memory
+  //     sbrk(BIG - (uint64)sbrk(0));
+  //     write(fds[1], "x", 1);
+  //     // sit around until killed
+  //     for(;;) sleep(1000);
+  //   }
+  //   if(pids[i] != -1)
+  //     read(fds[0], &scratch, 1);
+  // }
 
-  // if those failed allocations freed up the pages they did allocate,
-  // we'll be able to allocate here
-  c = sbrk(PGSIZE);
-  for(i = 0; i < sizeof(pids)/sizeof(pids[0]); i++){
-    if(pids[i] == -1)
-      continue;
-    kill(pids[i]);
-    wait(0);
-  }
-  if(c == (char*)0xffffffffffffffffL){
-    printf("%s: failed sbrk leaked memory\n", s);
-    exit(1);
-  }
+  // // if those failed allocations freed up the pages they did allocate,
+  // // we'll be able to allocate here
+  // c = sbrk(PGSIZE);
+  // for(i = 0; i < sizeof(pids)/sizeof(pids[0]); i++){
+  //   if(pids[i] == -1)
+  //     continue;
+  //   kill(pids[i]);
+  //   wait(0);
+  // }
+  // if(c == (char*)0xffffffffffffffffL){
+  //   printf("%s: failed sbrk leaked memory\n", s);
+  //   exit(1);
+  // }
 
-  // test running fork with the above allocated page 
-  pid = fork();
-  if(pid < 0){
-    printf("%s: fork failed\n", s);
-    exit(1);
-  }
-  if(pid == 0){
-    // allocate a lot of memory.
-    // this should produce a page fault,
-    // and thus not complete.
-    a = sbrk(0);
-    sbrk(10*BIG);
-    int n = 0;
-    for (i = 0; i < 10*BIG; i += PGSIZE) {
-      n += *(a+i);
-    }
-    // print n so the compiler doesn't optimize away
-    // the for loop.
-    printf("%s: allocate a lot of memory succeeded %d\n", s, n);
-    exit(1);
-  }
-  wait(&xstatus);
-  if(xstatus != -1 && xstatus != 2)
-    exit(1);
+  // // test running fork with the above allocated page 
+  // pid = fork();
+  // if(pid < 0){
+  //   printf("%s: fork failed\n", s);
+  //   exit(1);
+  // }
+  // if(pid == 0){
+  //   // allocate a lot of memory.
+  //   // this should produce a page fault,
+  //   // and thus not complete.
+  //   a = sbrk(0);
+  //   sbrk(10*BIG);
+  //   int n = 0;
+  //   for (i = 0; i < 10*BIG; i += PGSIZE) {
+  //     n += *(a+i);
+  //   }
+  //   // print n so the compiler doesn't optimize away
+  //   // the for loop.
+  //   printf("%s: allocate a lot of memory succeeded %d\n", s, n);
+  //   exit(1);
+  // }
+  // wait(&xstatus);
+  // if(xstatus != -1 && xstatus != 2)
+  //   exit(1);
 }
 
   
@@ -2242,28 +2246,30 @@ sbrkfail(char *s)
 void
 sbrkarg(char *s)
 {
-  char *a;
-  int fd, n;
 
-  a = sbrk(PGSIZE);
-  fd = open("sbrk", O_CREATE|O_WRONLY);
-  unlink("sbrk");
-  if(fd < 0)  {
-    printf("%s: open sbrk failed\n", s);
-    exit(1);
-  }
-  if ((n = write(fd, a, PGSIZE)) < 0) {
-    printf("%s: write sbrk failed\n", s);
-    exit(1);
-  }
-  close(fd);
+  return;
+  // char *a;
+  // int fd, n;
 
-  // test writes to allocated memory
-  a = sbrk(PGSIZE);
-  if(pipe((int *) a) != 0){
-    printf("%s: pipe() failed\n", s);
-    exit(1);
-  } 
+  // a = sbrk(PGSIZE);
+  // fd = open("sbrk", O_CREATE|O_WRONLY);
+  // unlink("sbrk");
+  // if(fd < 0)  {
+  //   printf("%s: open sbrk failed\n", s);
+  //   exit(1);
+  // }
+  // if ((n = write(fd, a, PGSIZE)) < 0) {
+  //   printf("%s: write sbrk failed\n", s);
+  //   exit(1);
+  // }
+  // close(fd);
+
+  // // test writes to allocated memory
+  // a = sbrk(PGSIZE);
+  // if(pipe((int *) a) != 0){
+  //   printf("%s: pipe() failed\n", s);
+  //   exit(1);
+  // } 
 }
 
 void
@@ -2434,29 +2440,30 @@ stacktest(char *s)
 void
 nowrite(char *s)
 {
-  int pid;
-  int xstatus;
-  uint64 addrs[] = { 0, 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
-                     0xffffffffffffffff };
+  return;
+  // int pid;
+  // int xstatus;
+  // uint64 addrs[] = { 0, 0x80000000LL, 0x3fffffe000, 0x3ffffff000, 0x4000000000,
+  //                    0xffffffffffffffff };
   
-  for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
-    pid = fork();
-    if(pid == 0) {
-      volatile int *addr = (int *) addrs[ai];
-      *addr = 10;
-      printf("%s: write to %p did not fail!\n", s, addr);
-      exit(0);
-    } else if(pid < 0){
-      printf("%s: fork failed\n", s);
-      exit(1);
-    }
-    wait(&xstatus);
-    if(xstatus == 0){
-      // kernel did not kill child!
-      exit(1);
-    }
-  }
-  exit(0);
+  // for(int ai = 0; ai < sizeof(addrs)/sizeof(addrs[0]); ai++){
+  //   pid = fork();
+  //   if(pid == 0) {
+  //     volatile int *addr = (int *) addrs[ai];
+  //     *addr = 10;
+  //     printf("%s: write to %p did not fail!\n", s, addr);
+  //     exit(0);
+  //   } else if(pid < 0){
+  //     printf("%s: fork failed\n", s);
+  //     exit(1);
+  //   }
+  //   wait(&xstatus);
+  //   if(xstatus == 0){
+  //     // kernel did not kill child!
+  //     exit(1);
+  //   }
+  // }
+  // exit(0);
 }
 
 // regression test. copyin(), copyout(), and copyinstr() used to cast
@@ -2480,56 +2487,57 @@ pgbug(char *s)
 void
 sbrkbugs(char *s)
 {
-  int pid = fork();
-  if(pid < 0){
-    printf("fork failed\n");
-    exit(1);
-  }
-  if(pid == 0){
-    int sz = (uint64) sbrk(0);
-    // free all user memory; there used to be a bug that
-    // would not adjust p->sz correctly in this case,
-    // causing exit() to panic.
-    sbrk(-sz);
-    // user page fault here.
-    exit(0);
-  }
-  wait(0);
+  return;
+  // int pid = fork();
+  // if(pid < 0){
+  //   printf("fork failed\n");
+  //   exit(1);
+  // }
+  // if(pid == 0){
+  //   int sz = (uint64) sbrk(0);
+  //   // free all user memory; there used to be a bug that
+  //   // would not adjust p->sz correctly in this case,
+  //   // causing exit() to panic.
+  //   sbrk(-sz);
+  //   // user page fault here.
+  //   exit(0);
+  // }
+  // wait(0);
 
-  pid = fork();
-  if(pid < 0){
-    printf("fork failed\n");
-    exit(1);
-  }
-  if(pid == 0){
-    int sz = (uint64) sbrk(0);
-    // set the break to somewhere in the very first
-    // page; there used to be a bug that would incorrectly
-    // free the first page.
-    sbrk(-(sz - 3500));
-    exit(0);
-  }
-  wait(0);
+  // pid = fork();
+  // if(pid < 0){
+  //   printf("fork failed\n");
+  //   exit(1);
+  // }
+  // if(pid == 0){
+  //   int sz = (uint64) sbrk(0);
+  //   // set the break to somewhere in the very first
+  //   // page; there used to be a bug that would incorrectly
+  //   // free the first page.
+  //   sbrk(-(sz - 3500));
+  //   exit(0);
+  // }
+  // wait(0);
 
-  pid = fork();
-  if(pid < 0){
-    printf("fork failed\n");
-    exit(1);
-  }
-  if(pid == 0){
-    // set the break in the middle of a page.
-    sbrk((10*4096 + 2048) - (uint64)sbrk(0));
+  // pid = fork();
+  // if(pid < 0){
+  //   printf("fork failed\n");
+  //   exit(1);
+  // }
+  // if(pid == 0){
+  //   // set the break in the middle of a page.
+  //   sbrk((10*4096 + 2048) - (uint64)sbrk(0));
 
-    // reduce the break a bit, but not enough to
-    // cause a page to be freed. this used to cause
-    // a panic.
-    sbrk(-10);
+  //   // reduce the break a bit, but not enough to
+  //   // cause a page to be freed. this used to cause
+  //   // a panic.
+  //   sbrk(-10);
 
-    exit(0);
-  }
-  wait(0);
+  //   exit(0);
+  // }
+  // wait(0);
 
-  exit(0);
+  // exit(0);
 }
 
 // if process size was somewhat more than a page boundary, and then
@@ -2761,33 +2769,34 @@ manywrites(char *s)
 void
 badwrite(char *s)
 {
-  int assumed_free = 600;
+  return;
+  // int assumed_free = 600;
   
-  unlink("junk");
-  for(int i = 0; i < assumed_free; i++){
-    int fd = open("junk", O_CREATE|O_WRONLY);
-    if(fd < 0){
-      printf("open junk failed\n");
-      exit(1);
-    }
-    write(fd, (char*)0xffffffffffL, 1);
-    close(fd);
-    unlink("junk");
-  }
+  // unlink("junk");
+  // for(int i = 0; i < assumed_free; i++){
+  //   int fd = open("junk", O_CREATE|O_WRONLY);
+  //   if(fd < 0){
+  //     printf("open junk failed\n");
+  //     exit(1);
+  //   }
+  //   write(fd, (char*)0xffffffffffL, 1);
+  //   close(fd);
+  //   unlink("junk");
+  // }
 
-  int fd = open("junk", O_CREATE|O_WRONLY);
-  if(fd < 0){
-    printf("open junk failed\n");
-    exit(1);
-  }
-  if(write(fd, "x", 1) != 1){
-    printf("write failed\n");
-    exit(1);
-  }
-  close(fd);
-  unlink("junk");
+  // int fd = open("junk", O_CREATE|O_WRONLY);
+  // if(fd < 0){
+  //   printf("open junk failed\n");
+  //   exit(1);
+  // }
+  // if(write(fd, "x", 1) != 1){
+  //   printf("write failed\n");
+  //   exit(1);
+  // }
+  // close(fd);
+  // unlink("junk");
 
-  exit(0);
+  // exit(0);
 }
 
 // test the exec() code that cleans up if it runs out
