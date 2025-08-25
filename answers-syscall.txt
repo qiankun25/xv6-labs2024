@@ -1,0 +1,65 @@
+1. Looking at the backtrace output, which function called syscall?
+   usertrap() at kernel/syscall.c:133
+   ![alt text](image-9.png)
+2. What is the value of p->trapframe->a7 and what does that value represent? (Hint: look user/initcode.S, the first user program xv6 starts.)
+   ![alt text](image-10.png)
+   a7 寄存器内容为 0x7,根据 user/initcode.S 中的代码可以看出，这个值代表的是 exec 系统调用。
+
+```
+# Initial process that execs /init.
+# This code runs in user space.
+
+#include "syscall.h"
+
+# exec(init, argv)
+.globl start
+start:
+        la a0, init
+        la a1, argv
+        li a7, SYS_exec
+        ecall
+
+# for(;;) exit();
+exit:
+        li a7, SYS_exit
+        ecall
+        jal exit
+
+# char init[] = "/init\0";
+init:
+  .string "/init\0"
+
+# char *argv[] = { init, 0 };
+.p2align 2
+argv:
+  .quad init
+  .quad 0
+
+```
+
+3. What was the previous mode that the CPU was in?
+   要判断之前的模式，需要查看 SPP 位（位 8）：
+   0x200000022 的二进制表示中，位 8 = 0
+   SPP = 0 表示之前 CPU 在用户模式（User mode）
+4. Write down the assembly instruction the kernel is panicing at. Which register corresponds to the variable num?
+   修改 kernel/syscall.c 中的 syscall 函数后，运行 make qemu 报错为：
+   scause=0xd sepc=0x80001c82 stval=0x0
+   panic: kerneltrap
+   在 kernel/kernel.asm 中搜索这个地址 0x80001c82，找到对应的汇编指令为：
+
+```
+ 80001c82:	00002683          	lw	a3,0(zero) # 0 <_entry-0x80000000>
+```
+
+对应的寄存器 a3 存放的是 num 的值
+
+5. Why does the kernel crash? Hint: look at figure 3-3 in the text; is address 0 mapped in the kernel address space? Is that confirmed by the value in scause above? (See description of scause in RISC-V privileged instructions)
+   调试过程
+   ![alt text](image-11.png)
+   内核崩溃是因为试图访问地址 0（空指针解引用），而地址 0 在内核地址空间中未映射。
+   详细说明:
+地址空间问题: 在 xv6 内核中，虚拟地址空间从高地址开始，地址 0 不在有效的内核地址范围内
+页面错误: scause 值为 0x8，表示加载页面错误（Load page fault）
+内存保护: 现代操作系统将地址 0 设为无效，防止空指针解引用错误
+硬件检测: RISC-V MMU 检测到访问未映射的地址，触发异常 6. What is the name of the process that was running when the kernel paniced? What is its process id (pid)?
+![alt text](image-12.png)
